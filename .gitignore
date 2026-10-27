@@ -13,3 +13,5 @@ os/.gdb_history
 os/vendor/
 *.bak
 students.txt
+# 本地编译的 QEMU 8.2.2（见 os/Makefile 的 QEMU 变量）
+.qemu/
