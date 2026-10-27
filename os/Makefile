@@ -6,6 +6,13 @@ KERNEL_BIN := $(KERNEL_ELF).bin
 DISASM_TMP := target/$(TARGET)/$(MODE)/asm
 OFFLINE :=
 
+# QEMU
+# 课程要求 QEMU 8.2.x（评测使用 8.2.2）。项目自带的 8.2.2 优先，避免用到
+# ~/.bashrc 里为其他实验准备的旧版 QEMU。
+# 需要改用其他版本时: make run QEMU=/path/to/qemu-system-riscv64
+QEMU_LOCAL := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../.qemu/8.2.2/bin/qemu-system-riscv64)
+QEMU ?= $(if $(wildcard $(QEMU_LOCAL)),$(QEMU_LOCAL),qemu-system-riscv64)
+
 # BOARD
 BOARD := qemu
 SBI ?= rustsbi
@@ -65,7 +72,7 @@ disasm-vim: kernel
 run: run-inner
 
 run-inner: build
-	@qemu-system-riscv64 \
+	@$(QEMU) \
 		-machine virt \
 		-nographic \
 		-bios $(BOOTLOADER) \
@@ -73,12 +80,12 @@ run-inner: build
 
 debug: build
 	@tmux new-session -d \
-		"qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S" && \
+		"$(QEMU) -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S" && \
 		tmux split-window -h "riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'" && \
 		tmux -2 attach-session -d
 
 gdbserver: build
-	@qemu-system-riscv64 -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S
+	@$(QEMU) -machine virt -nographic -bios $(BOOTLOADER) -device loader,file=$(KERNEL_BIN),addr=$(KERNEL_ENTRY_PA) -s -S
 
 gdbclient:
 	@riscv64-unknown-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
