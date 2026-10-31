@@ -71,7 +71,19 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Scheduling priority used by the stride scheduler.
+    pub priority: usize,
+
+    /// Accumulated stride; the task with the smallest stride runs next.
+    pub stride: u64,
 }
+
+/// A large constant used to compute each task's stride pass.
+pub const BIG_STRIDE: u64 = 1_000_000_000;
+
+/// Priority assigned to every task when it is created.
+pub const DEFAULT_PRIORITY: usize = 16;
 
 impl TaskControlBlockInner {
     pub fn get_trap_cx(&self) -> &'static mut TrapContext {
@@ -82,6 +94,10 @@ impl TaskControlBlockInner {
     }
     fn get_status(&self) -> TaskStatus {
         self.task_status
+    }
+    /// Stride increment corresponding to the current priority.
+    pub fn pass(&self) -> u64 {
+        (BIG_STRIDE / self.priority as u64).max(1)
     }
     pub fn is_zombie(&self) -> bool {
         self.get_status() == TaskStatus::Zombie
@@ -135,6 +151,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    priority: DEFAULT_PRIORITY,
+                    stride: 0,
                 })
             },
         };
@@ -216,6 +234,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    priority: parent_inner.priority,
+                    stride: parent_inner.stride,
                 })
             },
         });
