@@ -262,6 +262,94 @@ impl MemorySet {
             false
         }
     }
+
+    /// Map `len` bytes of fresh physical memory at `start` with `permission`.
+    /// Both `start` and `len` are expected to be page aligned by the caller.
+    pub fn mmap(&mut self, start: VirtAddr, len: usize, permission: MapPermission) -> bool {
+        if len == 0 {
+            return true;
+        }
+        let Some(end_raw) = start.0.checked_add(len) else {
+            return false;
+        };
+        let end: VirtAddr = end_raw.into();
+        if end <= start {
+            return false;
+        }
+        for vpn in VPNRange::new(start.floor(), end.ceil()) {
+            if self
+                .page_table
+                .translate(vpn)
+                .map_or(false, |pte| pte.is_valid())
+            {
+                return false;
+            }
+        }
+        self.insert_framed_area(start, end, permission);
+        true
+    }
+
+    /// Remove the mapping of `len` bytes starting at `start`.
+    /// Returns `false` if any page in the range is not mapped.
+    pub fn unmap(&mut self, start: VirtAddr, len: usize) -> bool {
+        if len == 0 {
+            return true;
+        }
+        let Some(end_raw) = start.0.checked_add(len) else {
+            return false;
+        };
+        let start_vpn = start.floor();
+        let end_vpn: VirtPageNum = VirtAddr(end_raw).ceil();
+        if start_vpn >= end_vpn {
+            return true;
+        }
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            if self
+                .page_table
+                .translate(vpn)
+                .map_or(true, |pte| !pte.is_valid())
+            {
+                return false;
+            }
+        }
+        for vpn in VPNRange::new(start_vpn, end_vpn) {
+            self.page_table.unmap(vpn);
+        }
+        // Carve the unmapped range out of the area metadata, splitting areas
+        // when only part of them was unmapped. Dropping `FrameTracker`s frees
+        // the corresponding physical pages.
+        let old_areas = core::mem::take(&mut self.areas);
+        for mut area in old_areas {
+            let a_start = area.vpn_range.get_start();
+            let a_end = area.vpn_range.get_end();
+            if a_end <= start_vpn || a_start >= end_vpn {
+                self.areas.push(area);
+                continue;
+            }
+            let mut right_frames = area.data_frames.split_off(&start_vpn);
+            if a_start < start_vpn {
+                let mut left = MapArea::new(
+                    a_start.into(),
+                    start_vpn.into(),
+                    area.map_type,
+                    area.map_perm,
+                );
+                left.data_frames = area.data_frames;
+                self.areas.push(left);
+            }
+            if a_end > end_vpn {
+                let mut right = MapArea::new(
+                    end_vpn.into(),
+                    a_end.into(),
+                    area.map_type,
+                    area.map_perm,
+                );
+                right.data_frames = right_frames.split_off(&end_vpn);
+                self.areas.push(right);
+            }
+        }
+        true
+    }
 }
 /// map area structure, controls a contiguous piece of virtual memory
 pub struct MapArea {
